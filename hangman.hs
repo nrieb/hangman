@@ -10,7 +10,8 @@ logo = ["--------------------------------------------",
         "| #### ##### # # # #  ## # # # ##### # # # |",
         "| #  # #   # #  ## #   # #   # #   # #  ## |",
         "| #  # #   # #   #  ###  #   # #   # #   # |",
-        "--------------------------------------------"]
+        "--------------------------------------------",
+        ""]
 
 showLogo :: IO ()
 showLogo = do
@@ -24,9 +25,7 @@ intro currentWord = ["Welcome to the game Hangman!",
          "If you think you know the word, you can type it in.",
          "You will lose if you have guessed 10 letters wrong.",
          "",
-         "",
          "This is the word you need to guess: " ++ currentWord,
-         "",
          ""]
 
 showIntro :: String -> IO ()
@@ -106,9 +105,8 @@ gallows 10 = ["  _______",
 
 gallows _ = error "Only 0-10 are available for gallows."
 
-printGallows :: (Eq a, Num a) => a -> IO ()
-printGallows n = do
-  mapM_ putStrLn (gallows n)
+invalidChar :: [String]
+invalidChar = ["Only alphabetic symbols are allowed (a-z, A-Z), try again:"]
 
 results :: [String]
 results = ["---------------",
@@ -124,6 +122,8 @@ failure guessWord = ["You guessed the wrong word. The word was " ++
 success :: [String]
 success = ["Congratulations you guessed the right word!", ""]
 
+
+-- makeNewWord 'h' "haskell" "......." == "h......"
 makeNewWord :: Eq a => a -> [a] -> [a] -> [a]
 makeNewWord c = 
     zipWith (\ left right -> if left == c then left else right)
@@ -136,36 +136,78 @@ roundEnd currentWord numErrors =
      ""] ++
     gallows numErrors
 
-playRound :: (Ord a, Num a, Show a, Num b, Show b) => b -> String -> String -> a -> IO ()
+data RoundState = RoundState {roundNumber :: Int,
+                              currentWord :: String,
+                              numErrors :: Int,
+                              output :: [String],
+                              proceed :: Bool
+                             } deriving (Show)
+
+processIncorrect :: Int -> String -> String -> Int -> Char -> RoundState
+processIncorrect roundNumber guessWord currentWord numErrors c =
+    let newRound = (roundNumber + 1)
+        newWord = makeNewWord c guessWord currentWord
+        newErrors = (numErrors + 1)
+        output = map (++ ['\n']) (["", "That letter was incorrect.", ""] ++
+                                  (roundEnd newWord newErrors))
+    in
+      if newErrors < 10 then
+          let addendum = 
+                  [(show newRound) ++ ".     Enter the letter(s) you want to guess: "]
+          in RoundState newRound newWord newErrors (output ++ addendum) True
+      else
+          let addendum = 
+                  map (++ ['\n']) (results ++ (failure guessWord))
+          in RoundState newRound newWord newErrors (output ++ addendum) False
+
+processCorrect :: Int -> String -> String -> Int -> Char -> RoundState
+processCorrect roundNumber guessWord currentWord numErrors c = 
+    let newRound = (roundNumber + 1)
+        newWord = makeNewWord c guessWord currentWord
+        output = map (++ ['\n']) (["", "That letter was correct.", ""] ++
+                                  (roundEnd newWord numErrors))
+    in
+      if newWord /= guessWord then
+          let addendum = 
+                  [(show newRound) ++ ".     Enter the letter(s) you want to guess: "]
+          in RoundState newRound newWord numErrors (output ++ addendum) True
+      else
+          let addendum = map (++ ['\n']) (results ++ success)
+          in RoundState newRound newWord numErrors (output ++ addendum) False
+
+processValid :: Int -> String -> String -> Int -> Char -> RoundState
+processValid roundNumber guessWord currentWord numErrors c = 
+    if c `elem` guessWord then
+        processCorrect roundNumber guessWord currentWord numErrors c
+    else
+        processIncorrect roundNumber guessWord currentWord numErrors c
+
+processNonNull :: Int -> String -> String -> Int -> Char -> RoundState
+processNonNull roundNumber guessWord currentWord numErrors c = 
+    if (not . isAlpha) c then
+        RoundState roundNumber currentWord numErrors (map (++ ['\n']) invalidChar) True
+    else
+        processValid roundNumber guessWord currentWord numErrors c
+
+
+processGuess :: Int -> String -> String -> Int -> Char -> RoundState
+processGuess roundNumber guessWord currentWord numErrors c = 
+    if c == '\n' then
+        RoundState roundNumber currentWord numErrors [] True
+    else
+        processNonNull roundNumber guessWord currentWord numErrors c
+
+playRound :: Int -> String -> String -> Int -> IO ()
 playRound roundNumber guessWord currentWord numErrors = do
   c <- liftM toLower getChar
-  let nextRound = (roundNumber + 1)
-  if c == '\n' then  do
-      playRound roundNumber guessWord currentWord numErrors
+  let (RoundState nextRound nextWord newErrors output proceed) = 
+          processGuess roundNumber guessWord currentWord numErrors c
+  mapM_ putStr output
+  hFlush stdout
+  if proceed then do
+      playRound nextRound guessWord nextWord newErrors
   else do
-      if (not . isAlpha) c then do
-          putStrLn "Only alphabetic symbols are allowed (a-z, A-Z), try again:"
-          playRound nextRound guessWord currentWord numErrors
-      else do
-          let newWord = makeNewWord c guessWord currentWord
-          if c `elem` guessWord then do
-              mapM_ putStrLn (["", "That letter was correct.", ""] ++
-                              (roundEnd newWord numErrors))
-              if guessWord == newWord then do
-                  mapM_ putStrLn (results ++ success)
-              else do
-                putStr ((show nextRound) ++ ".     Enter the letter(s) you want to guess: ")
-                hFlush stdout
-                playRound nextRound guessWord newWord numErrors
-          else do 
-              mapM_ putStrLn (["", "That letter was incorrect.", ""] ++ 
-                            (roundEnd newWord (numErrors + 1)))
-              if (numErrors + 1) < 10 then do
-                  putStr ((show nextRound) ++ ".     Enter the letter(s) you want to guess: ")
-                  hFlush stdout
-                  playRound nextRound guessWord newWord (numErrors + 1)
-              else do
-                  mapM_ putStrLn (results ++ (failure guessWord))
+      return ()
 
 runGame :: String -> IO ()
 runGame filename = do
@@ -173,6 +215,8 @@ runGame filename = do
   idx <- randomRIO (0, (length hangmanWords) - 1)
   let guessWord = hangmanWords !! idx
   let currentWord = map (const '.') guessWord
+  putStrLn ("guessWord = " ++ guessWord)
+  showLogo
   showIntro currentWord
   putStr "1.     Enter the letter(s) you want to guess: "
   hFlush stdout
@@ -180,5 +224,4 @@ runGame filename = do
 
 main :: IO ()
 main = do
-  showLogo
   runGame "moderate-words.txt"
