@@ -1,5 +1,7 @@
 import Data.Char
 import Control.Monad
+import System.IO
+import System.Random
 
 logo :: [String]
 logo = ["--------------------------------------------",
@@ -134,9 +136,7 @@ roundEnd currentWord numErrors =
      ""] ++
     gallows numErrors
 
-playRound :: (Eq a, Num a, Show a, Num b, Show b) => b -> String -> String -> a -> IO ()
-playRound _ guessWord _ 10 = do
-    mapM_ putStrLn (results ++ (failure guessWord))
+playRound :: (Ord a, Num a, Show a, Num b, Show b) => b -> String -> String -> a -> IO ()
 playRound roundNumber guessWord currentWord numErrors = do
   c <- liftM toLower getChar
   let nextRound = (roundNumber + 1)
@@ -155,23 +155,30 @@ playRound roundNumber guessWord currentWord numErrors = do
                   mapM_ putStrLn (results ++ success)
               else do
                 putStr ((show nextRound) ++ ".     Enter the letter(s) you want to guess: ")
+                hFlush stdout
                 playRound nextRound guessWord newWord numErrors
           else do 
-            mapM_ putStrLn (["", "That letter was incorrect.", ""] ++ 
+              mapM_ putStrLn (["", "That letter was incorrect.", ""] ++ 
                             (roundEnd newWord (numErrors + 1)))
-            putStr ((show nextRound) ++ ".     Enter the letter(s) you want to guess: ")
-            playRound nextRound guessWord newWord (numErrors + 1)
+              if (numErrors + 1) < 10 then do
+                  putStr ((show nextRound) ++ ".     Enter the letter(s) you want to guess: ")
+                  hFlush stdout
+                  playRound nextRound guessWord newWord (numErrors + 1)
+              else do
+                  mapM_ putStrLn (results ++ (failure guessWord))
 
-runGame :: IO ()
-runGame = do
-  --TODO get word randomly from file
-  let guessWord = "haskell"
+runGame :: String -> IO ()
+runGame filename = do
+  hangmanWords <- liftM lines (readFile filename)
+  idx <- randomRIO (0, (length hangmanWords) - 1)
+  let guessWord = hangmanWords !! idx
   let currentWord = map (const '.') guessWord
   showIntro currentWord
   putStr "1.     Enter the letter(s) you want to guess: "
+  hFlush stdout
   playRound 1 guessWord currentWord 0
 
 main :: IO ()
 main = do
   showLogo
-  runGame
+  runGame "moderate-words.txt"
